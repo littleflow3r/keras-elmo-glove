@@ -1,83 +1,84 @@
 import tensorflow as tf
-import pandas as pd
-import tensorflow_hub as hub
-import os, re
-from keras import backend as K
-import keras.layers as layers
-from keras.models import Model
-import numpy as np
+  2 import pandas as pd
+  3 import tensorflow_hub
+  4 import os, re
+  5 import keras.layers as layers
+  6 from keras.models import Model, Sequential
+  7 from keras.layers import Lambda, Dense, Input
+  8 import numpy as np
+  9
+ 10 # prepare the data
+ 11 def load_dataset(dir):
+ 12     dirall = [dir+"/pos", dir+"/neg"]
+ 13     for d in dirall:
+ 14         data = {}
+ 15         data["text"] = []
+ 16         data["score"] = []
+ 17         for files in os.listdir(d):
+ 18             with tf.gfile.GFile(d+"/"+files, "r") as f:
+ 19                 score = re.match("\d+_(\d+)\.txt", files).group(1)
+ 20                 data["text"].append(f.read())
+ 21                 data["score"].append(score)
+ 22
+ 23         if d[-3:] == 'pos':
+ 24             pos = pd.DataFrame.from_dict(data)
+ 25             pos["sentiment"] = 1
+ 26         elif d[-3:] == 'neg':
+ 27             neg = pd.DataFrame.from_dict(data)
+ 28             neg["sentiment"] = 0
+ 29     return pd.concat([pos, neg]).sample(frac=1).reset_index(drop=True)
+ 30
+ 31 train = load_dataset("aclImdb/train")
+ 32 test = load_dataset("aclImdb/test")
+ 33 sample = 200
+ 34 maxlen = 150
+ 35 x_train = train['text'][:sample].tolist()
+ 36 x_train = [' '.join(t.split()[0:maxlen]) for t in x_train]
+ 37 x_train = np.array(x_train, dtype=object)[:, np.newaxis]
+ 38 y_train = train['sentiment'][:sample].tolist()
+ 39
+ 40 x_test = test['text'][:sample].tolist()
+ 41 x_test = [' '.join(t.split()[0:maxlen]) for t in x_test]
+ 42 x_test = np.array(x_test, dtype=object)[:, np.newaxis]
+ 43 y_test = test['sentiment'][:sample].tolist()
+ 44
+ 45
+ 46 print ("loading elmo...:")
+ 47 elmo = tensorflow_hub.Module("https://tfhub.dev/google/elmo/2", trainable=True)
+ 48 #casting the input as string
+ 49 def elmo_embed(x):
+ 50     return elmo(tf.squeeze(tf.cast(x, tf.string)), signature="default", as_dict=    True)["default"]
+ 52 #defining the model architecture
+ 53 def build_model():
+ 54     input_t = layers.Input(shape=(1,), dtype=tf.string)
+ 55     elmo_layer = layers.Lambda(elmo_embed)(input_t)
+ 56     dense1 = layers.Dense(32, activation='relu')(elmo_layer)
+ 57     dense2 = layers.Dense(1, activation='sigmoid')(dense1)
+ 58     return Model(inputs=[input_t],outputs=dense2)
+ 59
+ 60
+ 61 model = build_model()
+ 62 print (model.summary())
+ 63
+ 64 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['acc'])
+ 65
+ 66 print ('fit........')
+ 67 history = model.fit(x_train, y_train,
+ 68         epochs=10,
+ 69         batch_size=10,
+ 70         validation_data=(x_test, y_test))
+ 71 print ('history:', history.history)
+ 72
+ 73 import matplotlib.pyplot as plt
+ 74
+ 75 val_acc = history.history['val_acc']
+ 76 val_loss = history.history['val_loss']
+ 77
+ 78 epochs = range(1, len(val_acc) +1)
+ 79
+ 80 plt.plot(epochs, val_loss, 'bo', label='Test loss')
+ 81 plt.plot(epochs, val_acc, 'b', label='Test acc')
+ 82 plt.title('Test loss and acc')
+ 83 plt.legend()
+ 84 plt.savefig('test.png')
 
-sess = tf.Session()
-K.set_session(sess)
-
-def load_directory_data(directory):
-	data = {}
-	data["sentence"] = []
-	data["sentiment"] = []
-	for file_path in os.listdir(directory):
-		with tf.gfile.GFile(os.path.join(directory, file_path), "r") as f:
-			data["sentence"].append(f.read())
-			data["sentiment"].append(re.match("\d+_(\d+)\.txt", file_path).group(1))
-
-	return pd.DataFrame.from_dict(data)
-
-# Merge positive and negative examples, add a polarity column and shuffle.
-def load_dataset(directory):
-	pos_df = load_directory_data(os.path.join(directory, "pos"))
-	neg_df = load_directory_data(os.path.join(directory, "neg"))
-	pos_df["polarity"] = 1
-	neg_df["polarity"] = 0
-	return pd.concat([pos_df, neg_df]).sample(frac=1).reset_index(drop=True)
-
-
-tf.logging.set_verbosity(tf.logging.ERROR)
-dataset = "aclImdb"
-train_df = load_dataset(os.path.join(os.path.dirname(dataset), "aclImdb", "train"))
-
-test_df = load_dataset(os.path.join(os.path.dirname(dataset), "aclImdb", "test"))
-print (train_df.head())
-
-print ('elmo model.....')
-elmo_model = hub.Module("https://tfhub.dev/google/elmo/1", trainable=True)
-sess.run(tf.global_variables_initializer())
-sess.run(tf.tables_initializer())
-
-def ElmoEmbedding(x):
-	return elmo_model(tf.squeeze(tf.cast(x, tf.string)), signature="default", as_dict=True)["default"]
-
-input_text = layers.Input(shape=(1,), dtype=tf.string) 
-embedding = layers.Lambda(ElmoEmbedding, output_shape=(1024,))(input_text)
-dense = layers.Dense(256, activation='relu')(embedding)
-pred = layers.Dense(1, activation='sigmoid')(dense)
-
-model = Model(inputs=[input_text],outputs=pred)
-
-model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-model.summary()
-
-train_text = train_df['sentence'][:200].tolist()
-train_text = [' '.join(t.split()[0:150]) for t in train_text]
-train_text = np.array(train_text, dtype=object)[:, np.newaxis]
-train_label = train_df['polarity'][:200].tolist()
-
-test_text = test_df['sentence'][:100].tolist()
-test_text = [' '.join(t.split()[0:150]) for t in test_text]
-test_text = np.array(test_text, dtype=object)[:, np.newaxis]
-test_label = test_df['polarity'][:100].tolist()
-
-print ('fit........')
-history = model.fit(train_text, train_label, validation_data=(test_text, test_label), epochs=5, batch_size=32)
-print (history.history)
-
-import matplotlib.pyplot as plt
-
-val_acc = history.history['val_acc']
-val_loss = history.history['val_loss']
-
-epochs = range(1, len(val_acc) +1)
-
-plt.plot(epochs, val_loss, 'bo', label='Test loss')
-plt.plot(epochs, val_acc, 'b', label='Test acc')
-plt.title('Test loss and acc')
-plt.legend()
-plt.savefig('test.png')
