@@ -90,8 +90,7 @@ history = model.fit(x_train, y_train, epochs=10, batch_size=10, validation_data=
 #model.save_weights('pretrained_glove_model.h5')
 
 print (history.history)
-#import sys
-#sys.exit()
+
 import matplotlib.pyplot as plt
 
 acc = history.history['acc']
@@ -110,7 +109,7 @@ plt.savefig('test.png')
 
 import sys
 sys.exit()
-
+#plot the training and validation loss
 plt.plot(epochs, acc, 'bo', label='Training acc')
 plt.plot(epochs, val_acc, 'b', label='Validation acc')
 plt.title('Training and validation acc')
